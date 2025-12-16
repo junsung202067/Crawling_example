@@ -26,7 +26,7 @@ def save_kw_notice_html():
 
 def scrape_kw_notice():
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless = False, slow_mo = 50)
+        browser = p.chromium.launch(headless = True, slow_mo = 50)
         page = browser.new_page()
         url = "https://www.kw.ac.kr/ko/life/notice.jsp?srCategoryId=&mode=list&searchKey=1&searchVal="
         print("광운대 공지사항 페이지로 이동합니다")
@@ -49,7 +49,6 @@ def scrape_kw_notice():
             link = None
             title = None
             category = None
-            data = None
             new_icon_text = ""
             file_icon_text = ""
 
@@ -89,21 +88,101 @@ def scrape_kw_notice():
                 # 전체 제목에서 카테고리와 new 아이콘 텍스트 제거
                 title = full_title.replace(category, "").replace(new_icon_text, "").replace(file_icon_text, "").strip()
 
-                print(f"[{i}] 링크: {full_link}")
-                print(f"[{i}] 카테고리: {category}")
-                print(f"[{i}] 제목: {title}")
-                print("--------------------------------------------------") 
+                # print(f"[{i}] 링크: {full_link}")
+                # print(f"[{i}] 카테고리: {category}")
+                # print(f"[{i}] 제목: {title}")
+                # print("--------------------------------------------------") 
 
-                
+                all_notices.append({
+                    "링크": full_link,
+                    "카테고리": category,
+                    "제목": title
+             })
 
             except Exception as e:
                 print(f"[{i}] 링크 또는 카테고리 정보를 가져오는 중 오류 발생: {e}")
-            
-            all_notices.append({
-                "링크": full_link,
-                "카테고리": category,
-                "제목": title
-            })
+        
+        for i, notice in enumerate(all_notices):
+            full_link = notice['링크']
+            print(f"[{i}] {notice['카테고리']} - {notice['제목']} ({notice['링크']})")
+
+            try:
+                page.goto(full_link, wait_until="load", timeout=10000)
+                page.wait_for_selector("li.contents", state="visible", timeout=5000)
+
+                # 글 내용 추출
+                content_text = "" 
+                content_locator = page.locator("div.board-view-box > ul > li.contents")
+                if content_locator.count() > 0:
+                    content_text = content_locator.inner_text().strip()
+                else:
+                    content_text = ""
+
+                
+                # 글 html 추출
+                content_html = "" 
+                content_html_locator = page.locator("div.board-view-box > ul > li.contents")
+                if content_html_locator.count() > 0:
+                    content_html = content_html_locator.inner_html().strip()
+
+                    file_name = f"kw_notice_{i}.html"
+                    try:
+                        with open(file=file_name, mode="w", encoding="utf-8") as f:
+                            f.write(content_html)
+                        print(f"[{i}] 공지사항 내용을 {file_name} 파일로 저장했습니다.")
+                    except Exception as e:
+                        print(f"[{i}] 공지사항 내용을 파일로 저장하는 중 오류 발생: {e}")
+                else:
+                    print(f"[{i}] 공지사항 내용이 없습니다.")
+                    content_html = ""
+
+                # 이미지 경로 추출
+                image_base_url = "https://www.kw.ac.kr"
+                image_urls = []
+                image_locator = page.locator("li.contents img").all()
+                # 이미지가 있는 경우
+                if len(image_locator) > 0:
+                    # 이미지가 여러개일 수 있으므로 반복문 처리
+                    for img_locator in image_locator:
+                        src = img_locator.get_attribute(name="src")
+                        alt_text = img_locator.get_attribute(name="alt")
+                        if src:
+                            full_src = src
+                            if src.startswith("/"):
+                                full_src = image_base_url + src
+                            image_urls.append(full_src)            
+
+
+                # 파일 경로 추출
+                file_base_url = "https://www.kw.ac.kr"
+                file_attachments = []
+                file_locator = page.locator("div.board-view-box  li.attachment a").all()
+
+                for f_locator in file_locator:
+                    file_href = f_locator.get_attribute(name="href")
+
+                    full_text = f_locator.inner_text().strip()
+
+                    if file_href and full_text:
+                        file_name = full_text.replace("Attachment", "", 1).strip()
+                        file_name = ' '.join(file_name.split())
+                        full_file_href = file_href
+                        if file_href.startswith("/"):
+                            full_file_href = file_base_url + file_href
+
+                        file_attachments.append({
+                            "파일명": file_name,
+                            "파일링크": full_file_href
+                        })
+                
+                # ****** 데이터 저장! ******
+                notice["내용"] = content_text
+                notice["이미지_URL_목록"] = image_urls
+                notice["첨부_파일_목록"] = file_attachments
+                # **************************
+
+            except Exception as e:
+                print(f"[{i}] 공지사항 상세 페이지를 가져오는 중 오류 발생: {e}")
 
         return all_notices
     
